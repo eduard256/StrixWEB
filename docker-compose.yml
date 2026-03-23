@@ -15,8 +15,8 @@ services:
       - traefik.http.routers.strixweb-api.tls.certresolver=letsencrypt
       - traefik.http.services.strixweb-api.loadbalancer.server.port=8080
     networks:
-      - traefik
+      - traefik-public
 
 networks:
-  traefik:
+  traefik-public:
     external: true
