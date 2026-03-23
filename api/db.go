@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 var db *sql.DB
@@ -116,28 +117,114 @@ func querySearch(q string, limit int) ([]SearchResult, error) {
 		limit = 50
 	}
 
-	rows, err := db.Query(`
-		SELECT DISTINCT s.brand_id, b.brand, sm.model
-		FROM stream_models sm
-		JOIN streams s ON s.id = sm.stream_id
-		JOIN brands b ON b.brand_id = s.brand_id
-		WHERE sm.model LIKE ? AND sm.model != '*'
-		ORDER BY b.brand, sm.model
-		LIMIT ?`, "%"+q+"%", limit)
-	if err != nil {
-		return nil, err
+	// Split query into tokens: first token may be brand, rest are model
+	tokens := splitTokens(q)
+	if len(tokens) == 0 {
+		return nil, nil
 	}
-	defer rows.Close()
 
+	// Strategy 1: treat first token as brand, rest as model filter
+	// Strategy 2: search everything as model name
+	// Strategy 3: search everything as brand name
+	// Combine results, deduplicate
+
+	seen := map[string]bool{}
 	var results []SearchResult
-	for rows.Next() {
-		var r SearchResult
-		if err := rows.Scan(&r.BrandID, &r.Brand, &r.Model); err != nil {
-			return nil, err
+
+	// If multiple tokens: first = brand, rest = model
+	if len(tokens) >= 2 {
+		brandQ := "%" + tokens[0] + "%"
+		modelQ := "%" + strings.Join(tokens[1:], "%") + "%"
+
+		rows, err := db.Query(`
+			SELECT DISTINCT s.brand_id, b.brand, sm.model
+			FROM stream_models sm
+			JOIN streams s ON s.id = sm.stream_id
+			JOIN brands b ON b.brand_id = s.brand_id
+			WHERE (b.brand LIKE ? OR b.brand_id LIKE ?)
+			  AND sm.model LIKE ? AND sm.model != '*'
+			ORDER BY b.brand, sm.model
+			LIMIT ?`, brandQ, brandQ, modelQ, limit)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var r SearchResult
+				if err := rows.Scan(&r.BrandID, &r.Brand, &r.Model); err == nil {
+					key := r.BrandID + "/" + r.Model
+					if !seen[key] {
+						seen[key] = true
+						results = append(results, r)
+					}
+				}
+			}
 		}
-		results = append(results, r)
 	}
-	return results, rows.Err()
+
+	// Search full query as model name
+	if len(results) < limit {
+		fullQ := "%" + q + "%"
+		remaining := limit - len(results)
+
+		rows, err := db.Query(`
+			SELECT DISTINCT s.brand_id, b.brand, sm.model
+			FROM stream_models sm
+			JOIN streams s ON s.id = sm.stream_id
+			JOIN brands b ON b.brand_id = s.brand_id
+			WHERE sm.model LIKE ? AND sm.model != '*'
+			ORDER BY b.brand, sm.model
+			LIMIT ?`, fullQ, remaining)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var r SearchResult
+				if err := rows.Scan(&r.BrandID, &r.Brand, &r.Model); err == nil {
+					key := r.BrandID + "/" + r.Model
+					if !seen[key] {
+						seen[key] = true
+						results = append(results, r)
+					}
+				}
+			}
+		}
+	}
+
+	// Search full query as brand name (return brand with empty model)
+	if len(results) < limit {
+		brandQ := "%" + q + "%"
+		remaining := limit - len(results)
+
+		rows, err := db.Query(`
+			SELECT brand_id, brand FROM brands
+			WHERE brand LIKE ? OR brand_id LIKE ?
+			ORDER BY brand
+			LIMIT ?`, brandQ, brandQ, remaining)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var r SearchResult
+				if err := rows.Scan(&r.BrandID, &r.Brand); err == nil {
+					key := r.BrandID + "/"
+					if !seen[key] {
+						seen[key] = true
+						results = append(results, r)
+					}
+				}
+			}
+		}
+	}
+
+	return results, nil
+}
+
+func splitTokens(s string) []string {
+	var tokens []string
+	for _, t := range strings.Fields(strings.ToLower(s)) {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			tokens = append(tokens, t)
+		}
+	}
+	return tokens
 }
 
 func queryStats() (Stats, error) {
