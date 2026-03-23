@@ -1,0 +1,22 @@
+services:
+  api:
+    image: eduard256/strixweb-api:latest
+    container_name: strixweb-api
+    restart: unless-stopped
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_REPO=${GITHUB_REPO:-eduard256/StrixCamDB}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - LISTEN=:8080
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.strixweb-api.rule=Host(`apistrix.webaweba.com`)
+      - traefik.http.routers.strixweb-api.entrypoints=websecure
+      - traefik.http.routers.strixweb-api.tls.certresolver=letsencrypt
+      - traefik.http.services.strixweb-api.loadbalancer.server.port=8080
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    external: true
