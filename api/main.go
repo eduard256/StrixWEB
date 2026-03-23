@@ -16,6 +16,7 @@ var (
 func main() {
 	listen := env("LISTEN", ":8080")
 	dbPath := env("DB_PATH", "./cameras.db")
+	corsOrigins := env("CORS_ORIGINS", "*")
 	githubToken = env("GITHUB_TOKEN", "")
 	githubRepo = env("GITHUB_REPO", "eduard256/StrixCamDB")
 
@@ -23,11 +24,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.HandleFunc("/api/brands/", apiBrands)
-	http.HandleFunc("/api/brands", apiBrands)
-	http.HandleFunc("/api/search", apiSearch)
-	http.HandleFunc("/api/stats", apiStats)
-	http.HandleFunc("/api/contribute", apiContribute)
+	// read-only endpoints: rate limit + CORS
+	http.HandleFunc("/api/brands/", cors(rateLimit(apiBrands), corsOrigins))
+	http.HandleFunc("/api/brands", cors(rateLimit(apiBrands), corsOrigins))
+	http.HandleFunc("/api/search", cors(rateLimit(apiSearch), corsOrigins))
+	http.HandleFunc("/api/stats", cors(rateLimit(apiStats), corsOrigins))
+
+	// write endpoint: rate limit + CORS + body size limit (1KB)
+	http.HandleFunc("/api/contribute", cors(rateLimit(limitBody(apiContribute, 1024)), corsOrigins))
 
 	log.Printf("listening on %s", listen)
 	log.Fatal(http.ListenAndServe(listen, nil))

@@ -39,6 +39,13 @@ func apiContribute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// validate field lengths
+	if len(req.Brand) > 200 || len(req.URL) > 500 || len(req.Protocol) > 20 ||
+		len(req.Model) > 200 || len(req.MACPrefix) > 20 || len(req.Comment) > 1000 {
+		writeJSON(w, map[string]any{"ok": false, "error": "field too long"})
+		return
+	}
+
 	issueURL, err := createIssue(githubToken, githubRepo, req)
 	if err != nil {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
